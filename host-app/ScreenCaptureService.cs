@@ -9,10 +9,38 @@ using System.Runtime.InteropServices;
 namespace PulseHost
 {
     /// <summary>
-    /// Service for capturing screen content
+    /// Service for capturing screen content - uses Windows API for forced capture
     /// </summary>
     public class ScreenCaptureService
     {
+        // Windows API for forced screen capture (bypasses app blocking)
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetDesktopWindow();
+        
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetWindowDC(IntPtr hWnd);
+        
+        [DllImport("user32.dll")]
+        private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+        
+        [DllImport("gdi32.dll")]
+        private static extern bool BitBlt(IntPtr hdcDest, int xDest, int yDest, int wDest, int hDest, IntPtr hdcSource, int xSrc, int ySrc, CopyPixelOperation rop);
+        
+        [DllImport("gdi32.dll")]
+        private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+        
+        [DllImport("gdi32.dll")]
+        private static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int nWidth, int nHeight);
+        
+        [DllImport("gdi32.dll")]
+        private static extern IntPtr SelectObject(IntPtr hdc, IntPtr hObject);
+        
+        [DllImport("gdi32.dll")]
+        private static extern bool DeleteObject(IntPtr hObject);
+        
+        [DllImport("gdi32.dll")]
+        private static extern bool DeleteDC(IntPtr hdc);
+
         private bool isRunning = false;
         private Task? captureTask;
         private CancellationTokenSource? cts;
@@ -83,12 +111,24 @@ namespace PulseHost
                 int scaledWidth = (int)(bounds.Width * scaleFactor);
                 int scaledHeight = (int)(bounds.Height * scaleFactor);
 
-                // Capture full resolution first
-                using var fullBitmap = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppArgb);
-                using (var fullGraphics = Graphics.FromImage(fullBitmap))
-                {
-                    fullGraphics.CopyFromScreen(bounds.X, bounds.Y, 0, 0, bounds.Size, CopyPixelOperation.SourceCopy);
-                }
+                // Capture using BitBlt API (bypasses app blocking - FORCED CAPTURE)
+                IntPtr desktopHandle = GetDesktopWindow();
+                IntPtr desktopDC = GetWindowDC(desktopHandle);
+                IntPtr memoryDC = CreateCompatibleDC(desktopDC);
+                IntPtr bitmapHandle = CreateCompatibleBitmap(desktopDC, bounds.Width, bounds.Height);
+                IntPtr oldBitmap = SelectObject(memoryDC, bitmapHandle);
+                
+                // Force capture entire screen (no app can block this)
+                BitBlt(memoryDC, 0, 0, bounds.Width, bounds.Height, desktopDC, bounds.X, bounds.Y, CopyPixelOperation.SourceCopy | CopyPixelOperation.CaptureBlt);
+                
+                // Convert to managed Bitmap
+                Bitmap fullBitmap = Image.FromHbitmap(bitmapHandle);
+                
+                // Cleanup Windows handles
+                SelectObject(memoryDC, oldBitmap);
+                DeleteObject(bitmapHandle);
+                DeleteDC(memoryDC);
+                ReleaseDC(desktopHandle, desktopDC);
 
                 // Scale down for faster transmission
                 using var scaledBitmap = new Bitmap(scaledWidth, scaledHeight, PixelFormat.Format32bppArgb);
@@ -145,6 +185,63 @@ namespace PulseHost
         public void SetQuality(int newQuality)
         {
             quality = Math.Clamp(newQuality, 1, 100);
+        }
+
+        // Windows API imports for FORCED screen capture
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetDesktopWindow();
+        
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetWindowDC(IntPtr hWnd);
+        
+        [DllImport("user32.dll")]
+        private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+        
+        [DllImport("gdi32.dll")]
+        private static extern bool BitBlt(IntPtr hdcDest, int xDest, int yDest, int wDest, int hDest, IntPtr hdcSource, int xSrc, int ySrc, int rop);
+        
+        [DllImport("gdi32.dll")]
+        private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+        
+        [DllImport("gdi32.dll")]
+        private static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int nWidth, int nHeight);
+        
+        [DllImport("gdi32.dll")]
+        private static extern IntPtr SelectObject(IntPtr hdc, IntPtr hObject);
+        
+        [DllImport("gdi32.dll")]
+        private static extern bool DeleteObject(IntPtr hObject);
+        
+        [DllImport("gdi32.dll")]
+        private static extern bool DeleteDC(IntPtr hdc);
+
+        private const int SRCCOPY = 0x00CC0020;
+        private const int CAPTUREBLT = 0x40000000;
+
+        /// <summary>
+        /// Force capture screen using Windows API - bypasses ANY app blocking
+        /// </summary>
+        private Bitmap CaptureScreenForcedAPI(Rectangle bounds)
+        {
+            IntPtr desktopHandle = GetDesktopWindow();
+            IntPtr desktopDC = GetWindowDC(desktopHandle);
+            IntPtr memoryDC = CreateCompatibleDC(desktopDC);
+            IntPtr bitmapHandle = CreateCompatibleBitmap(desktopDC, bounds.Width, bounds.Height);
+            IntPtr oldBitmap = SelectObject(memoryDC, bitmapHandle);
+            
+            // FORCED CAPTURE - includes layered windows (apps cannot block)
+            BitBlt(memoryDC, 0, 0, bounds.Width, bounds.Height, desktopDC, bounds.X, bounds.Y, SRCCOPY | CAPTUREBLT);
+            
+            // Convert to managed Bitmap
+            Bitmap result = Image.FromHbitmap(bitmapHandle);
+            
+            // Cleanup Windows API handles
+            SelectObject(memoryDC, oldBitmap);
+            DeleteObject(bitmapHandle);
+            DeleteDC(memoryDC);
+            ReleaseDC(desktopHandle, desktopDC);
+            
+            return result;
         }
     }
 }

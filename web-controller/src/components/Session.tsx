@@ -72,8 +72,8 @@ export const Session: React.FC = () => {
               latestFrameNumberRef.current = message.frameNumber;
               const frameDiff = message.frameNumber - lastRenderedFrameRef.current;
               
-              if (frameDiff > 10) {
-                // Huge gap detected - skip to latest frame immediately
+              if (frameDiff > 5) {
+                // Gap detected - skip to latest frame immediately (5 frame threshold)
                 console.log(`Skipping frames ${lastRenderedFrameRef.current} to ${message.frameNumber} (gap: ${frameDiff})`);
                 renderFrame(message.imageData, message.frameNumber);
               } else if (frameDiff > 0) {
