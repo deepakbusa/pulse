@@ -16,8 +16,8 @@ namespace PulseHost
         private bool isRunning = false;
         private Task? captureTask;
         private CancellationTokenSource? cts;
-        private int fps = 30; // Target frames per second (increased for smoother motion)
-        private int quality = 60; // JPEG quality (1-100) - reduced for lower latency
+        private int fps = 20; // Target frames per second - balanced for network
+        private int quality = 40; // JPEG quality (1-100) - LOW for minimum latency
 
         public event Action<string>? OnFrameCaptured; // Base64 encoded JPEG image
 

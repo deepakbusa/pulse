@@ -437,25 +437,30 @@ export class WebSocketManager {
     }
 
     const { sessionId, frameNumber, imageData } = message;
-    console.log(`Frame received from host ${clientId}: session=${sessionId}, frame=${frameNumber}`);
     const session = db.getSessionById(sessionId);
 
     if (!session || session.status !== 'active') {
       return;
     }
 
-    // Forward frame to controller
+    // Forward frame to controller - ONLY if WebSocket is ready (low latency mode)
     const userClients = this.userConnections.get(session.userId);
     if (userClients) {
       for (const controllerClientId of userClients) {
         const controllerClient = this.clients.get(controllerClientId);
         if (controllerClient && controllerClient.sessionId === sessionId) {
-          this.sendMessage(controllerClient.ws, {
-            type: 'frame',
-            sessionId,
-            frameNumber,
-            imageData
-          });
+          // Check if WebSocket buffer is clear (prevents frame backlog)
+          if (controllerClient.ws.readyState === WebSocket.OPEN && controllerClient.ws.bufferedAmount === 0) {
+            this.sendMessage(controllerClient.ws, {
+              type: 'frame',
+              sessionId,
+              frameNumber,
+              imageData
+            });
+          } else {
+            // Drop frame if buffer is backed up (live streaming mode)
+            console.log(`Frame ${frameNumber} dropped - buffer backed up`);
+          }
         }
       }
     }
