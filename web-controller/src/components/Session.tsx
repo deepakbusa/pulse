@@ -11,6 +11,7 @@ export const Session: React.FC = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [frameCount, setFrameCount] = useState(0);
   const [quality, setQuality] = useState<'high' | 'medium' | 'low'>('high');
+  const isRenderingRef = useRef(false); // Prevent frame backlog
 
   useEffect(() => {
     connectWebSocket();
@@ -94,12 +95,16 @@ export const Session: React.FC = () => {
   };
 
   const renderFrame = (imageData: string) => {
+    // Skip frame if already rendering (prevent backlog)
+    if (isRenderingRef.current) return;
+    
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    isRenderingRef.current = true;
     const img = new Image();
     img.onload = () => {
       // Set canvas size to match image dimensions (for coordinate mapping)
@@ -108,6 +113,10 @@ export const Session: React.FC = () => {
       
       // Draw the frame
       ctx.drawImage(img, 0, 0);
+      isRenderingRef.current = false;
+    };
+    img.onerror = () => {
+      isRenderingRef.current = false;
     };
     img.src = `data:image/jpeg;base64,${imageData}`;
   };
