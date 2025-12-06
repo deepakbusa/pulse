@@ -12,6 +12,8 @@ export const Session: React.FC = () => {
   const [frameCount, setFrameCount] = useState(0);
   const [quality, setQuality] = useState<'high' | 'medium' | 'low'>('high');
   const isRenderingRef = useRef(false); // Prevent frame backlog
+  const latestFrameNumberRef = useRef(0); // Track latest frame from host
+  const lastRenderedFrameRef = useRef(0); // Track what we rendered
 
   useEffect(() => {
     connectWebSocket();
@@ -65,7 +67,21 @@ export const Session: React.FC = () => {
             break;
           case 'frame':
             if (message.sessionId === sessionId) {
-              renderFrame(message.imageData);
+              // CRITICAL FIX: Only render if this frame is newer than what we've seen
+              // Skip old frames that are backed up in the queue
+              latestFrameNumberRef.current = message.frameNumber;
+              const frameDiff = message.frameNumber - lastRenderedFrameRef.current;
+              
+              if (frameDiff > 10) {
+                // Huge gap detected - skip to latest frame immediately
+                console.log(`Skipping frames ${lastRenderedFrameRef.current} to ${message.frameNumber} (gap: ${frameDiff})`);
+                renderFrame(message.imageData, message.frameNumber);
+              } else if (frameDiff > 0) {
+                // Normal progression - render this frame
+                renderFrame(message.imageData, message.frameNumber);
+              }
+              // Else: old frame, ignore it completely
+              
               setFrameCount(message.frameNumber);
             }
             break;
@@ -94,7 +110,7 @@ export const Session: React.FC = () => {
     };
   };
 
-  const renderFrame = (imageData: string) => {
+  const renderFrame = (imageData: string, frameNumber: number) => {
     // Skip frame if already rendering (prevent backlog)
     if (isRenderingRef.current) return;
     
@@ -113,6 +129,7 @@ export const Session: React.FC = () => {
       
       // Draw the frame
       ctx.drawImage(img, 0, 0);
+      lastRenderedFrameRef.current = frameNumber; // Update what we rendered
       isRenderingRef.current = false;
     };
     img.onerror = () => {

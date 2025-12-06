@@ -16,8 +16,9 @@ namespace PulseHost
         private bool isRunning = false;
         private Task? captureTask;
         private CancellationTokenSource? cts;
-        private int fps = 20; // Target frames per second - balanced for network
-        private int quality = 40; // JPEG quality (1-100) - LOW for minimum latency
+        private int fps = 25; // Target frames per second - increased for responsiveness
+        private int quality = 35; // JPEG quality (1-100) - VERY LOW for minimum latency
+        private double scaleFactor = 0.6; // Scale down to 60% to reduce bandwidth
 
         public event Action<string>? OnFrameCaptured; // Base64 encoded JPEG image
 
@@ -78,12 +79,24 @@ namespace PulseHost
                 // Get primary screen bounds
                 var bounds = System.Windows.Forms.Screen.PrimaryScreen?.Bounds ?? new System.Drawing.Rectangle(0, 0, 1920, 1080);
 
-                // Create bitmap
-                using var bitmap = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppArgb);
-                using var graphics = Graphics.FromImage(bitmap);
+                // Calculate scaled dimensions for faster transmission
+                int scaledWidth = (int)(bounds.Width * scaleFactor);
+                int scaledHeight = (int)(bounds.Height * scaleFactor);
 
-                // Capture screen
-                graphics.CopyFromScreen(bounds.X, bounds.Y, 0, 0, bounds.Size, CopyPixelOperation.SourceCopy);
+                // Capture full resolution first
+                using var fullBitmap = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppArgb);
+                using (var fullGraphics = Graphics.FromImage(fullBitmap))
+                {
+                    fullGraphics.CopyFromScreen(bounds.X, bounds.Y, 0, 0, bounds.Size, CopyPixelOperation.SourceCopy);
+                }
+
+                // Scale down for faster transmission
+                using var scaledBitmap = new Bitmap(scaledWidth, scaledHeight, PixelFormat.Format32bppArgb);
+                using (var scaledGraphics = Graphics.FromImage(scaledBitmap))
+                {
+                    scaledGraphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.Low; // Fast scaling
+                    scaledGraphics.DrawImage(fullBitmap, 0, 0, scaledWidth, scaledHeight);
+                }
 
                 // Compress to JPEG
                 using var memoryStream = new MemoryStream();
@@ -93,11 +106,11 @@ namespace PulseHost
                 var jpegCodec = GetEncoder(ImageFormat.Jpeg);
                 if (jpegCodec != null)
                 {
-                    bitmap.Save(memoryStream, jpegCodec, encoderParameters);
+                    scaledBitmap.Save(memoryStream, jpegCodec, encoderParameters);
                 }
                 else
                 {
-                    bitmap.Save(memoryStream, ImageFormat.Jpeg);
+                    scaledBitmap.Save(memoryStream, ImageFormat.Jpeg);
                 }
 
                 // Convert to base64

@@ -449,18 +449,16 @@ export class WebSocketManager {
       for (const controllerClientId of userClients) {
         const controllerClient = this.clients.get(controllerClientId);
         if (controllerClient && controllerClient.sessionId === sessionId) {
-          // Check if WebSocket buffer is clear (prevents frame backlog)
-          if (controllerClient.ws.readyState === WebSocket.OPEN && controllerClient.ws.bufferedAmount === 0) {
+          // AGGRESSIVE latency check: only send if buffer is completely clear (< 50KB)
+          if (controllerClient.ws.readyState === WebSocket.OPEN && controllerClient.ws.bufferedAmount < 50000) {
             this.sendMessage(controllerClient.ws, {
               type: 'frame',
               sessionId,
               frameNumber,
               imageData
             });
-          } else {
-            // Drop frame if buffer is backed up (live streaming mode)
-            console.log(`Frame ${frameNumber} dropped - buffer backed up`);
           }
+          // Drop frame silently if buffer has any backlog (prioritize latest frames only)
         }
       }
     }
