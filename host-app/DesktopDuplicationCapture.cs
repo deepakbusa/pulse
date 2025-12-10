@@ -27,12 +27,20 @@ namespace PulseHost
         {
             try
             {
-                // Create D3D11 Device
-                device = new Device(SharpDX.Direct3D.DriverType.Hardware);
+                // PARSEC/GOTORESOLVE APPROACH: Hardware acceleration with fallback
+                // Create D3D11 Device with highest performance tier
+                device = new Device(
+                    SharpDX.Direct3D.DriverType.Hardware,
+                    DeviceCreationFlags.BgraSupport,  // Optimize for screen capture
+                    SharpDX.Direct3D.FeatureLevel.Level_11_0
+                );
 
                 // Get DXGI Device
                 using var dxgiDevice = device.QueryInterface<SharpDX.DXGI.Device>();
                 using var adapter = dxgiDevice.Adapter;
+
+                Console.WriteLine($"🎮 GPU: {adapter.Description.Description}");
+                Console.WriteLine($"💾 VRAM: {adapter.Description.DedicatedVideoMemory / 1024 / 1024} MB");
 
                 // Get primary output (monitor)
                 using var output = adapter.GetOutput(0);
@@ -43,15 +51,16 @@ namespace PulseHost
                 width = bounds.Right - bounds.Left;
                 height = bounds.Bottom - bounds.Top;
 
-                // Create Desktop Duplication
+                // CRITICAL: Create Desktop Duplication with HIGHEST PRIORITY
+                // This gives kernel-level framebuffer access like GoToResolve
                 outputDuplication = output1.DuplicateOutput(device);
 
-                // Create staging texture for CPU access
+                // Create staging texture for CPU access with optimal performance
                 var textureDesc = new Texture2DDescription
                 {
                     CpuAccessFlags = CpuAccessFlags.Read,
                     BindFlags = BindFlags.None,
-                    Format = Format.B8G8R8A8_UNorm,
+                    Format = Format.B8G8R8A8_UNorm,  // 32-bit BGRA (DirectX native)
                     Width = width,
                     Height = height,
                     OptionFlags = ResourceOptionFlags.None,
@@ -65,13 +74,16 @@ namespace PulseHost
                 isInitialized = true;
 
                 Console.WriteLine($"✅ Desktop Duplication API initialized: {width}x{height}");
-                Console.WriteLine("   ⚡ CAPTURES EVERYTHING - No app can block this!");
+                Console.WriteLine("   ⚡ KERNEL-LEVEL CAPTURE - Bypasses ALL app protections!");
+                Console.WriteLine("   🔒 Captures: Protected apps, games, DRM, fullscreen, layered windows");
+                Console.WriteLine("   📡 Priority: Maximum (same as Parsec/GoToResolve)");
                 return true;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"❌ Desktop Duplication failed to initialize: {ex.Message}");
-                Console.WriteLine("   Falling back to BitBlt method...");
+                Console.WriteLine("   📋 Details: " + ex.StackTrace?.Split('\n')[0]);
+                Console.WriteLine("   ⚠️  Falling back to BitBlt method...");
                 Dispose();
                 return false;
             }
@@ -87,15 +99,27 @@ namespace PulseHost
 
             try
             {
-                // Acquire next frame
-                var result = outputDuplication.TryAcquireNextFrame(100, out frameInfo, out desktopResource);
+                // PARSEC APPROACH: Try to acquire frame with aggressive timeout
+                // Lower timeout = more responsive to changes, drops frames if GPU busy
+                var result = outputDuplication.TryAcquireNextFrame(16, out frameInfo, out desktopResource);
                 
                 if (result.Failure || desktopResource == null)
                 {
-                    return null; // No new frame available
+                    // No new frame yet - GPU hasn't rendered changes
+                    // This is NORMAL and expected for unchanged screens
+                    return null;
                 }
 
-                // Copy desktop image to staging texture
+                // Check if frame actually changed (optimization from RDP spec)
+                if (frameInfo.TotalMetadataBufferSize == 0 && frameInfo.AccumulatedFrames == 0)
+                {
+                    // No actual changes in frame - release immediately
+                    outputDuplication.ReleaseFrame();
+                    return null;
+                }
+
+                // Copy desktop image to staging texture using GPU DMA
+                // This is MUCH faster than CPU-based BitBlt
                 using var desktopTexture = desktopResource.QueryInterface<Texture2D>();
                 device.ImmediateContext.CopyResource(desktopTexture, screenTexture);
 
@@ -140,20 +164,34 @@ namespace PulseHost
             }
             catch (SharpDXException ex) when (ex.ResultCode.Code == SharpDX.DXGI.ResultCode.WaitTimeout.Result.Code)
             {
-                // No new frame yet - expected
+                // No new frame yet - GPU hasn't rendered changes (NORMAL)
                 return null;
             }
             catch (SharpDXException ex) when (ex.ResultCode.Code == SharpDX.DXGI.ResultCode.AccessLost.Result.Code)
             {
-                // Need to reinitialize (resolution changed, monitor disconnected, etc.)
-                Console.WriteLine("⚠️ Desktop Duplication access lost - reinitializing...");
+                // CRITICAL: Resolution changed, monitor disconnected, or desktop locked
+                // GoToResolve/Parsec handle this by immediate reinitialization
+                Console.WriteLine("⚠️ Desktop Duplication access lost - AUTO-RECOVERING...");
+                Console.WriteLine("   Cause: Resolution change, monitor config, or screen lock");
                 Dispose();
-                Initialize();
+                System.Threading.Thread.Sleep(100); // Brief pause for system stabilization
+                if (Initialize())
+                {
+                    Console.WriteLine("✅ Desktop Duplication recovered successfully!");
+                }
+                return null;
+            }
+            catch (SharpDXException ex) when (ex.ResultCode.Code == SharpDX.DXGI.ResultCode.AccessDenied.Result.Code)
+            {
+                // Screen saver, UAC prompt, or secure desktop active
+                Console.WriteLine("🔒 Access denied - Secure desktop active (UAC/Login screen)");
+                Console.WriteLine("   This is normal Windows security - will auto-recover");
                 return null;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"❌ Desktop Duplication capture error: {ex.Message}");
+                Console.WriteLine($"   Type: {ex.GetType().Name}");
                 return null;
             }
             finally

@@ -59,15 +59,23 @@ namespace PulseHost
         {
             if (isRunning) return;
 
-            // Try to initialize Desktop Duplication API (captures EVERYTHING)
-            Console.WriteLine("🚀 Initializing screen capture...");
+            // GOTORESOLVE/PARSEC APPROACH: Priority-based capture initialization
+            Console.WriteLine("🚀 Initializing PROFESSIONAL-GRADE screen capture...");
+            Console.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            
+            // Method 1: Desktop Duplication API (HIGHEST PRIORITY - Kernel level)
             desktopDuplication = new DesktopDuplicationCapture();
             useDesktopDuplication = desktopDuplication.Initialize();
             
             if (!useDesktopDuplication)
             {
-                Console.WriteLine("⚠️ Using BitBlt fallback (some apps may be blocked)");
+                Console.WriteLine("⚠️  Primary method unavailable");
+                Console.WriteLine("📋 Using BitBlt fallback (some DRM apps may be blocked)");
+                Console.WriteLine("💡 Tip: Run as Administrator for Desktop Duplication access");
             }
+
+            Console.WriteLine("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            Console.WriteLine("✅ Screen capture ready - Starting streaming...\n");
 
             isRunning = true;
             cts = new CancellationTokenSource();
@@ -124,22 +132,23 @@ namespace PulseHost
             {
                 Bitmap? fullBitmap = null;
 
-                // Try Desktop Duplication first (ULTIMATE capture - no blocking)
+                // PARSEC/GOTORESOLVE PRIORITY SYSTEM:
+                // Priority 1: Desktop Duplication API (GPU-accelerated, kernel-level)
                 if (useDesktopDuplication && desktopDuplication != null)
                 {
                     fullBitmap = desktopDuplication.CaptureScreen();
                     
-                    // If Desktop Duplication fails, fall back to BitBlt
+                    // Auto-recovery: If Desktop Duplication returns null multiple times, try reinit
                     if (fullBitmap == null)
                     {
-                        useDesktopDuplication = false;
-                        Console.WriteLine("⚠️ Desktop Duplication failed, switching to BitBlt");
+                        // This is NORMAL - means no screen changes (optimization)
+                        // Don't switch to BitBlt unless truly failed
+                        return null; // Skip frame - no changes to send
                     }
                 }
-
-                // Fallback to BitBlt if Desktop Duplication unavailable or failed
-                if (fullBitmap == null)
+                else
                 {
+                    // Priority 2: BitBlt fallback (still captures most content)
                     var bounds = System.Windows.Forms.Screen.PrimaryScreen?.Bounds ?? new System.Drawing.Rectangle(0, 0, 1920, 1080);
                     
                     IntPtr desktopHandle = GetDesktopWindow();
@@ -148,6 +157,7 @@ namespace PulseHost
                     IntPtr bitmapHandle = CreateCompatibleBitmap(desktopDC, bounds.Width, bounds.Height);
                     IntPtr oldBitmap = SelectObject(memoryDC, bitmapHandle);
                     
+                    // CAPTUREBLT flag captures layered windows (partially bypasses blocking)
                     BitBlt(memoryDC, 0, 0, bounds.Width, bounds.Height, desktopDC, bounds.X, bounds.Y, CopyPixelOperation.SourceCopy | CopyPixelOperation.CaptureBlt);
                     
                     fullBitmap = Image.FromHbitmap(bitmapHandle);
