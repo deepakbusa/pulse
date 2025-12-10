@@ -52,6 +52,14 @@ namespace PulseHost
 
         private DesktopDuplicationCapture? desktopDuplication;
         private bool useDesktopDuplication = true;
+        
+        // Logging and diagnostics
+        private int totalFramesAttempted = 0;
+        private int totalFramesSucceeded = 0;
+        private int totalFramesSkipped = 0;
+        private int consecutiveFailures = 0;
+        private DateTime lastLogTime = DateTime.Now;
+        private string lastCaptureMethod = "None";
 
         public event Action<string>? OnFrameCaptured; // Base64 encoded JPEG image
 
@@ -105,15 +113,52 @@ namespace PulseHost
 
                 try
                 {
+                    totalFramesAttempted++;
                     var imageData = CaptureScreen();
+                    
                     if (imageData != null)
                     {
+                        totalFramesSucceeded++;
+                        consecutiveFailures = 0;
                         OnFrameCaptured?.Invoke(imageData);
+                        
+                        // Log every 100 frames
+                        if (totalFramesSucceeded % 100 == 0)
+                        {
+                            Console.WriteLine($"📊 Stats: {totalFramesSucceeded} frames sent, {totalFramesSkipped} skipped, Method: {lastCaptureMethod}");
+                        }
+                    }
+                    else
+                    {
+                        totalFramesSkipped++;
+                        consecutiveFailures++;
+                        
+                        // Log if many consecutive failures
+                        if (consecutiveFailures == 50)
+                        {
+                            Console.WriteLine($"⚠️  WARNING: {consecutiveFailures} consecutive null frames - Screen may be unchanged or capture blocked");
+                            Console.WriteLine($"   Current method: {lastCaptureMethod}");
+                            Console.WriteLine($"   Desktop Duplication active: {useDesktopDuplication}");
+                        }
+                    }
+                    
+                    // Periodic detailed stats every 10 seconds
+                    if ((DateTime.Now - lastLogTime).TotalSeconds >= 10)
+                    {
+                        var successRate = totalFramesAttempted > 0 ? (totalFramesSucceeded * 100.0 / totalFramesAttempted) : 0;
+                        Console.WriteLine($"\n📈 10-Second Report:");
+                        Console.WriteLine($"   Attempted: {totalFramesAttempted}, Succeeded: {totalFramesSucceeded}, Skipped: {totalFramesSkipped}");
+                        Console.WriteLine($"   Success Rate: {successRate:F1}%");
+                        Console.WriteLine($"   Capture Method: {lastCaptureMethod}");
+                        Console.WriteLine($"   Desktop Duplication Status: {(useDesktopDuplication ? "ACTIVE" : "FALLBACK TO BITBLT")}");
+                        lastLogTime = DateTime.Now;
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Screen capture error: {ex.Message}");
+                    Console.WriteLine($"❌ CAPTURE EXCEPTION: {ex.GetType().Name}: {ex.Message}");
+                    Console.WriteLine($"   Stack: {ex.StackTrace}");
+                    consecutiveFailures++;
                 }
 
                 var elapsed = DateTime.Now - startTime;
@@ -136,6 +181,7 @@ namespace PulseHost
                 // Priority 1: Desktop Duplication API (GPU-accelerated, kernel-level)
                 if (useDesktopDuplication && desktopDuplication != null)
                 {
+                    lastCaptureMethod = "Desktop Duplication API";
                     fullBitmap = desktopDuplication.CaptureScreen();
                     
                     // Auto-recovery: If Desktop Duplication returns null multiple times, try reinit
@@ -145,10 +191,16 @@ namespace PulseHost
                         // Don't switch to BitBlt unless truly failed
                         return null; // Skip frame - no changes to send
                     }
+                    
+                    if (consecutiveFailures >= 50 && totalFramesSucceeded % 10 == 0)
+                    {
+                        Console.WriteLine($"✅ Desktop Duplication API working - Captured {fullBitmap.Width}x{fullBitmap.Height}");
+                    }
                 }
                 else
                 {
                     // Priority 2: BitBlt fallback (still captures most content)
+                    lastCaptureMethod = "BitBlt Fallback";
                     var bounds = System.Windows.Forms.Screen.PrimaryScreen?.Bounds ?? new System.Drawing.Rectangle(0, 0, 1920, 1080);
                     
                     IntPtr desktopHandle = GetDesktopWindow();
@@ -158,9 +210,19 @@ namespace PulseHost
                     IntPtr oldBitmap = SelectObject(memoryDC, bitmapHandle);
                     
                     // CAPTUREBLT flag captures layered windows (partially bypasses blocking)
-                    BitBlt(memoryDC, 0, 0, bounds.Width, bounds.Height, desktopDC, bounds.X, bounds.Y, CopyPixelOperation.SourceCopy | CopyPixelOperation.CaptureBlt);
+                    bool bitBltSuccess = BitBlt(memoryDC, 0, 0, bounds.Width, bounds.Height, desktopDC, bounds.X, bounds.Y, CopyPixelOperation.SourceCopy | CopyPixelOperation.CaptureBlt);
+                    
+                    if (!bitBltSuccess)
+                    {
+                        Console.WriteLine($"⚠️  BitBlt FAILED - Some apps may be blocking capture");
+                    }
                     
                     fullBitmap = Image.FromHbitmap(bitmapHandle);
+                    
+                    if (consecutiveFailures >= 50 && totalFramesSucceeded % 10 == 0)
+                    {
+                        Console.WriteLine($"📸 BitBlt capture: {fullBitmap.Width}x{fullBitmap.Height}, Success: {bitBltSuccess}");
+                    }
                     
                     SelectObject(memoryDC, oldBitmap);
                     DeleteObject(bitmapHandle);
@@ -202,12 +264,22 @@ namespace PulseHost
 
                     // Convert to base64
                     var bytes = memoryStream.ToArray();
-                    return Convert.ToBase64String(bytes);
+                    var base64 = Convert.ToBase64String(bytes);
+                    
+                    // Log compression details occasionally
+                    if (totalFramesSucceeded % 100 == 0)
+                    {
+                        Console.WriteLine($"📦 Compression: {bytes.Length / 1024}KB, Quality: {quality}, Scale: {scaleFactor * 100}%");
+                    }
+                    
+                    return base64;
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to capture screen: {ex.Message}");
+                Console.WriteLine($"❌ CAPTURE FAILED: {ex.GetType().Name}: {ex.Message}");
+                Console.WriteLine($"   Method: {lastCaptureMethod}");
+                Console.WriteLine($"   Stack: {ex.StackTrace}");
                 return null;
             }
         }

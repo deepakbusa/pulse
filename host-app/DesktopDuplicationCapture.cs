@@ -171,27 +171,38 @@ namespace PulseHost
             {
                 // CRITICAL: Resolution changed, monitor disconnected, or desktop locked
                 // GoToResolve/Parsec handle this by immediate reinitialization
-                Console.WriteLine("⚠️ Desktop Duplication access lost - AUTO-RECOVERING...");
-                Console.WriteLine("   Cause: Resolution change, monitor config, or screen lock");
+                Console.WriteLine($"\n⚠️  DESKTOP DUPLICATION ACCESS LOST - AUTO-RECOVERING...");
+                Console.WriteLine($"   Result Code: {ex.ResultCode.Code:X}");
+                Console.WriteLine($"   Cause: Resolution change, monitor config, or screen lock");
+                Console.WriteLine($"   Time: {DateTime.Now:HH:mm:ss.fff}");
                 Dispose();
                 System.Threading.Thread.Sleep(100); // Brief pause for system stabilization
                 if (Initialize())
                 {
-                    Console.WriteLine("✅ Desktop Duplication recovered successfully!");
+                    Console.WriteLine($"✅ Desktop Duplication recovered successfully at {DateTime.Now:HH:mm:ss.fff}\n");
+                }
+                else
+                {
+                    Console.WriteLine($"❌ Desktop Duplication recovery FAILED at {DateTime.Now:HH:mm:ss.fff}\n");
                 }
                 return null;
             }
             catch (SharpDXException ex) when (ex.ResultCode.Code == SharpDX.DXGI.ResultCode.AccessDenied.Result.Code)
             {
                 // Screen saver, UAC prompt, or secure desktop active
-                Console.WriteLine("🔒 Access denied - Secure desktop active (UAC/Login screen)");
-                Console.WriteLine("   This is normal Windows security - will auto-recover");
+                Console.WriteLine($"\n🔒 ACCESS DENIED - Secure desktop active");
+                Console.WriteLine($"   Result Code: {ex.ResultCode.Code:X}");
+                Console.WriteLine($"   Cause: UAC prompt, Login screen, Screen saver, or Secure Desktop");
+                Console.WriteLine($"   Time: {DateTime.Now:HH:mm:ss.fff}");
+                Console.WriteLine($"   This is normal Windows security - will auto-recover\n");
                 return null;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Desktop Duplication capture error: {ex.Message}");
-                Console.WriteLine($"   Type: {ex.GetType().Name}");
+                Console.WriteLine($"\n❌ DESKTOP DUPLICATION ERROR: {ex.GetType().Name}");
+                Console.WriteLine($"   Message: {ex.Message}");
+                Console.WriteLine($"   Time: {DateTime.Now:HH:mm:ss.fff}");
+                Console.WriteLine($"   Stack: {ex.StackTrace}\n");
                 return null;
             }
             finally

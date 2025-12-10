@@ -430,9 +430,16 @@ export class WebSocketManager {
     }
   }
 
+  private frameStats = {
+    received: 0,
+    forwarded: 0,
+    dropped: 0,
+    lastLogTime: Date.now()
+  };
+
   private handleFrame(clientId: string, client: ConnectedClient, message: any) {
     if (client.type !== 'host' || !client.sessionId) {
-      console.log(`Frame rejected: client type=${client.type}, sessionId=${client.sessionId}`);
+      console.log(`❌ Frame rejected: client type=${client.type}, sessionId=${client.sessionId}`);
       return;
     }
 
@@ -440,8 +447,11 @@ export class WebSocketManager {
     const session = db.getSessionById(sessionId);
 
     if (!session || session.status !== 'active') {
+      console.log(`⚠️  Frame rejected: session ${sessionId} not active (status: ${session?.status || 'not found'})`);
       return;
     }
+
+    this.frameStats.received++;
 
     // Forward frame to controller - ONLY if WebSocket is ready (low latency mode)
     const userClients = this.userConnections.get(session.userId);
@@ -449,17 +459,46 @@ export class WebSocketManager {
       for (const controllerClientId of userClients) {
         const controllerClient = this.clients.get(controllerClientId);
         if (controllerClient && controllerClient.sessionId === sessionId) {
+          const bufferSize = controllerClient.ws.bufferedAmount;
+          
           // AGGRESSIVE latency check: only send if buffer is completely clear (< 50KB)
-          if (controllerClient.ws.readyState === WebSocket.OPEN && controllerClient.ws.bufferedAmount < 50000) {
+          if (controllerClient.ws.readyState === WebSocket.OPEN && bufferSize < 50000) {
             this.sendMessage(controllerClient.ws, {
               type: 'frame',
               sessionId,
               frameNumber,
               imageData
             });
+            this.frameStats.forwarded++;
+            
+            // Log every 100 frames
+            if (this.frameStats.forwarded % 100 === 0) {
+              console.log(`📊 Backend Stats: Received ${this.frameStats.received}, Forwarded ${this.frameStats.forwarded}, Dropped ${this.frameStats.dropped}`);
+            }
+          } else {
+            // Drop frame if buffer has backlog
+            this.frameStats.dropped++;
+            
+            if (this.frameStats.dropped % 50 === 0) {
+              console.log(`⚠️  Frame drop #${this.frameStats.dropped}: Buffer ${bufferSize} bytes, State: ${controllerClient.ws.readyState}`);
+            }
           }
-          // Drop frame silently if buffer has any backlog (prioritize latest frames only)
+          
+          // Periodic detailed report every 10 seconds
+          if (Date.now() - this.frameStats.lastLogTime >= 10000) {
+            const dropRate = this.frameStats.received > 0 ? (this.frameStats.dropped * 100.0 / this.frameStats.received) : 0;
+            console.log(`\n📈 Backend 10-Second Report:`);
+            console.log(`   Frames Received: ${this.frameStats.received}`);
+            console.log(`   Frames Forwarded: ${this.frameStats.forwarded}`);
+            console.log(`   Frames Dropped: ${this.frameStats.dropped} (${dropRate.toFixed(1)}%)`);
+            console.log(`   Current Buffer: ${bufferSize} bytes\n`);
+            this.frameStats.lastLogTime = Date.now();
+          }
         }
+      }
+    } else {
+      if (this.frameStats.received % 50 === 0) {
+        console.log(`⚠️  No controllers connected for session ${sessionId}`);
       }
     }
   }
