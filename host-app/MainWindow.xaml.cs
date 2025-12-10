@@ -227,7 +227,20 @@ namespace PulseHost
             {
                 Dispatcher.Invoke(() =>
                 {
-                    MessageBox.Show($"Disconnected from server.\n\nServer: {config.ServerUrl}\n\nPlease check your internet connection and server status.", "Connection Lost", 
+                    Console.WriteLine($"\n🔴 HOST DISCONNECTION EVENT TRIGGERED");
+                    Console.WriteLine($"   Current Session: {currentSessionId ?? "None"}");
+                    Console.WriteLine($"   Frame Count: {frameCount}");
+                    Console.WriteLine($"   Screen Capture Running: {screenCapture != null}");
+                    Console.WriteLine($"   Time: {DateTime.Now:HH:mm:ss.fff}\n");
+                    
+                    // Stop session cleanly
+                    if (currentSessionId != null)
+                    {
+                        Console.WriteLine($"⚠️ Stopping active session due to disconnection");
+                        StopSession();
+                    }
+                    
+                    MessageBox.Show($"Disconnected from server.\n\nServer: {config.ServerUrl}\n\nCheck console for detailed error information.\n\nPlease check your internet connection and server status.", "Connection Lost", 
                         MessageBoxButton.OK, MessageBoxImage.Warning);
                     ShowPairingPanel();
                 });
@@ -236,6 +249,9 @@ namespace PulseHost
 
         private void StartSession(string sessionId)
         {
+            Console.WriteLine($"\n✅ STARTING SESSION: {sessionId}");
+            Console.WriteLine($"   Time: {DateTime.Now:HH:mm:ss.fff}\n");
+            
             currentSessionId = sessionId;
             frameCount = 0;
 
@@ -249,12 +265,29 @@ namespace PulseHost
                 if (wsClient != null && currentSessionId != null)
                 {
                     frameCount++;
-                    wsClient.SendFrame(currentSessionId, frameCount, imageData);
                     
-                    Dispatcher.Invoke(() =>
+                    try
                     {
-                        FrameCountText.Text = frameCount.ToString();
-                    });
+                        wsClient.SendFrame(currentSessionId, frameCount, imageData);
+                        
+                        Dispatcher.Invoke(() =>
+                        {
+                            FrameCountText.Text = frameCount.ToString();
+                        });
+                        
+                        // Log every 100 frames
+                        if (frameCount % 100 == 0)
+                        {
+                            Console.WriteLine($"📤 Sent frame {frameCount} successfully");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"\n❌ FRAME SEND ERROR at frame {frameCount}:");
+                        Console.WriteLine($"   Type: {ex.GetType().Name}");
+                        Console.WriteLine($"   Message: {ex.Message}");
+                        Console.WriteLine($"   Time: {DateTime.Now:HH:mm:ss.fff}\n");
+                    }
                 }
             };
 
@@ -266,6 +299,11 @@ namespace PulseHost
 
         private void StopSession()
         {
+            Console.WriteLine($"\n🛑 STOPPING SESSION");
+            Console.WriteLine($"   Session ID: {currentSessionId ?? "None"}");
+            Console.WriteLine($"   Total Frames Sent: {frameCount}");
+            Console.WriteLine($"   Time: {DateTime.Now:HH:mm:ss.fff}\n");
+            
             screenCapture?.Stop();
             screenCapture = null;
             inputSimulator = null;

@@ -39,6 +39,7 @@ namespace PulseHost
             if (ws == null || cts == null) return;
 
             var buffer = new byte[1024 * 1024]; // 1MB buffer for large frames
+            Console.WriteLine($"🔌 WebSocket receive loop started - State: {ws.State}");
 
             try
             {
@@ -48,6 +49,10 @@ namespace PulseHost
 
                     if (result.MessageType == WebSocketMessageType.Close)
                     {
+                        Console.WriteLine($"❌ WebSocket CLOSED by server");
+                        Console.WriteLine($"   Close Status: {result.CloseStatus}");
+                        Console.WriteLine($"   Close Description: {result.CloseStatusDescription}");
+                        Console.WriteLine($"   Time: {DateTime.Now:HH:mm:ss.fff}");
                         await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
                         OnDisconnected?.Invoke();
                         break;
@@ -56,10 +61,33 @@ namespace PulseHost
                     var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
                     HandleMessage(message);
                 }
+                
+                Console.WriteLine($"⚠️ WebSocket receive loop ended - Final State: {ws.State}");
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine($"ℹ️ WebSocket receive loop cancelled (normal shutdown)");
+            }
+            catch (WebSocketException wsEx)
+            {
+                Console.WriteLine($"\n❌ WEBSOCKET EXCEPTION:");
+                Console.WriteLine($"   Type: WebSocketException");
+                Console.WriteLine($"   Error Code: {wsEx.WebSocketErrorCode}");
+                Console.WriteLine($"   Native Error Code: {wsEx.NativeErrorCode}");
+                Console.WriteLine($"   Message: {wsEx.Message}");
+                Console.WriteLine($"   WebSocket State: {ws?.State}");
+                Console.WriteLine($"   Time: {DateTime.Now:HH:mm:ss.fff}");
+                Console.WriteLine($"   Stack: {wsEx.StackTrace}\n");
+                OnDisconnected?.Invoke();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"WebSocket receive error: {ex.Message}");
+                Console.WriteLine($"\n❌ RECEIVE LOOP EXCEPTION:");
+                Console.WriteLine($"   Type: {ex.GetType().Name}");
+                Console.WriteLine($"   Message: {ex.Message}");
+                Console.WriteLine($"   WebSocket State: {ws?.State}");
+                Console.WriteLine($"   Time: {DateTime.Now:HH:mm:ss.fff}");
+                Console.WriteLine($"   Stack: {ex.StackTrace}\n");
                 OnDisconnected?.Invoke();
             }
         }
@@ -166,7 +194,17 @@ namespace PulseHost
 
         private async Task Send(object data)
         {
-            if (ws == null || ws.State != WebSocketState.Open || cts == null) return;
+            if (ws == null || cts == null)
+            {
+                Console.WriteLine($"⚠️ Cannot send: WebSocket is null");
+                return;
+            }
+            
+            if (ws.State != WebSocketState.Open)
+            {
+                Console.WriteLine($"⚠️ Cannot send: WebSocket state is {ws.State}");
+                return;
+            }
 
             try
             {
@@ -174,9 +212,23 @@ namespace PulseHost
                 var bytes = Encoding.UTF8.GetBytes(json);
                 await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, cts.Token);
             }
+            catch (WebSocketException wsEx)
+            {
+                Console.WriteLine($"\n❌ SEND FAILED - WebSocketException:");
+                Console.WriteLine($"   Error Code: {wsEx.WebSocketErrorCode}");
+                Console.WriteLine($"   Message: {wsEx.Message}");
+                Console.WriteLine($"   State: {ws.State}");
+                Console.WriteLine($"   Time: {DateTime.Now:HH:mm:ss.fff}\n");
+                
+                // Trigger disconnection handler
+                OnDisconnected?.Invoke();
+            }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to send message: {ex.Message}");
+                Console.WriteLine($"\n❌ SEND FAILED - {ex.GetType().Name}:");
+                Console.WriteLine($"   Message: {ex.Message}");
+                Console.WriteLine($"   State: {ws?.State}");
+                Console.WriteLine($"   Time: {DateTime.Now:HH:mm:ss.fff}\n");
             }
         }
 
