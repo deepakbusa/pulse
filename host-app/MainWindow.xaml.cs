@@ -190,6 +190,10 @@ namespace PulseHost
             SetupWebSocketHandlers();
             await wsClient.Connect();
             await wsClient.SendAuthentication(deviceToken);
+            
+            // Initialize log helper for backend logging
+            LogHelper.Initialize(wsClient);
+            LogHelper.LogSuccess($"Host connected: {deviceName}");
         }
 
         private void SetupWebSocketHandlers()
@@ -232,6 +236,7 @@ namespace PulseHost
                     Console.WriteLine($"   Frame Count: {frameCount}");
                     Console.WriteLine($"   Screen Capture Running: {screenCapture != null}");
                     Console.WriteLine($"   Time: {DateTime.Now:HH:mm:ss.fff}\n");
+                    LogHelper.LogError($"Disconnected unexpectedly - Session: {currentSessionId ?? "None"}, Frames: {frameCount}");
                     
                     // Stop session cleanly
                     if (currentSessionId != null)
@@ -251,6 +256,7 @@ namespace PulseHost
         {
             Console.WriteLine($"\n✅ STARTING SESSION: {sessionId}");
             Console.WriteLine($"   Time: {DateTime.Now:HH:mm:ss.fff}\n");
+            LogHelper.LogSuccess($"Session started: {sessionId}");
             
             currentSessionId = sessionId;
             frameCount = 0;
@@ -303,6 +309,7 @@ namespace PulseHost
             Console.WriteLine($"   Session ID: {currentSessionId ?? "None"}");
             Console.WriteLine($"   Total Frames Sent: {frameCount}");
             Console.WriteLine($"   Time: {DateTime.Now:HH:mm:ss.fff}\n");
+            LogHelper.LogInfo($"Session stopped - {frameCount} frames sent");
             
             screenCapture?.Stop();
             screenCapture = null;

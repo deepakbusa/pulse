@@ -13,6 +13,8 @@ namespace PulseHost
         private readonly string serverUrl;
         private ClientWebSocket? ws;
         private CancellationTokenSource? cts;
+        private System.Timers.Timer? keepAliveTimer;
+        private DateTime lastMessageTime = DateTime.Now;
 
         public event Action<string, string>? OnPaired; // deviceId, deviceToken
         public event Action<string, string>? OnSessionRequest; // sessionId, userName
@@ -28,10 +30,51 @@ namespace PulseHost
         public async Task Connect()
         {
             ws = new ClientWebSocket();
+            
+            // Configure WebSocket for long-running connections
+            ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
+            
             cts = new CancellationTokenSource();
 
+            Console.WriteLine($"🔌 Connecting to {serverUrl}...");
             await ws.ConnectAsync(new Uri(serverUrl), cts.Token);
+            Console.WriteLine($"✅ Connected! State: {ws.State}");
+            
+            // Start keep-alive ping mechanism
+            StartKeepAlive();
+            
             _ = ReceiveLoop();
+        }
+        
+        private void StartKeepAlive()
+        {
+            // Send ping every 20 seconds to keep connection alive
+            keepAliveTimer = new System.Timers.Timer(20000);
+            keepAliveTimer.Elapsed += async (sender, e) =>
+            {
+                if (ws?.State == WebSocketState.Open)
+                {
+                    // Check if we've received any message in the last 60 seconds
+                    var timeSinceLastMessage = (DateTime.Now - lastMessageTime).TotalSeconds;
+                    
+                    if (timeSinceLastMessage > 60)
+                    {
+                        Console.WriteLine($"⚠️ No messages received for {timeSinceLastMessage:F0} seconds - connection may be dead");
+                    }
+                    
+                    try
+                    {
+                        await Send(new { type = "ping" });
+                        Console.WriteLine($"💓 Keep-alive ping sent (last message: {timeSinceLastMessage:F0}s ago)");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"❌ Keep-alive ping failed: {ex.Message}");
+                    }
+                }
+            };
+            keepAliveTimer.Start();
+            Console.WriteLine($"💓 Keep-alive timer started (ping every 20s)");
         }
 
         private async Task ReceiveLoop()
@@ -59,6 +102,7 @@ namespace PulseHost
                     }
 
                     var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                    lastMessageTime = DateTime.Now;
                     HandleMessage(message);
                 }
                 
@@ -192,6 +236,18 @@ namespace PulseHost
             });
         }
 
+        public void SendLog(string level, string message, string? deviceId = null)
+        {
+            _ = Send(new
+            {
+                type = "log",
+                level,
+                message,
+                deviceId,
+                timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff")
+            });
+        }
+
         private async Task Send(object data)
         {
             if (ws == null || cts == null)
@@ -236,11 +292,20 @@ namespace PulseHost
         {
             try
             {
+                Console.WriteLine($"🔌 Disconnecting WebSocket...");
+                keepAliveTimer?.Stop();
+                keepAliveTimer?.Dispose();
+                keepAliveTimer = null;
+                
                 cts?.Cancel();
                 ws?.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None).Wait(1000);
                 ws?.Dispose();
+                Console.WriteLine($"✅ Disconnected cleanly");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Disconnect exception: {ex.Message}");
+            }
         }
     }
 }

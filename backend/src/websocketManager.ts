@@ -18,6 +18,7 @@ export type WSMessage =
   | { type: 'frame'; sessionId: string; frameNumber: number; imageData: string }
   | { type: 'input'; sessionId: string; inputType: string; data: any }
   | { type: 'endSession'; sessionId: string }
+  | { type: 'log'; level: string; message: string; deviceId?: string; timestamp?: string }
   | { type: 'ping' }
   | { type: 'pong' };
 
@@ -98,6 +99,11 @@ export class WebSocketManager {
   }
 
   private handleMessage(clientId: string, message: WSMessage) {
+    // Handle log messages first (high priority)
+    if (message.type === 'log') {
+      this.handleLog(clientId, message);
+      return;
+    }
     const client = this.clients.get(clientId);
     if (!client) return;
 
@@ -528,6 +534,27 @@ export class WebSocketManager {
         });
       }
     }
+  }
+
+  private handleLog(clientId: string, message: any) {
+    const { level, message: logMessage, deviceId, timestamp } = message;
+    const client = this.clients.get(clientId);
+    
+    // Format log with timestamp and device info
+    const timeStr = timestamp || new Date().toISOString();
+    const deviceInfo = deviceId || client?.deviceId || clientId.substring(0, 8);
+    const levelEmoji = {
+      'info': 'ℹ️',
+      'warn': '⚠️',
+      'error': '❌',
+      'debug': '🔍',
+      'success': '✅'
+    }[level.toLowerCase()] || '📝';
+    
+    console.log(`\n${levelEmoji} [HOST LOG] ${timeStr}`);
+    console.log(`   Device: ${deviceInfo}`);
+    console.log(`   Level: ${level.toUpperCase()}`);
+    console.log(`   Message: ${logMessage}\n`);
   }
 
   private handleEndSession(clientId: string, client: ConnectedClient, message: any) {
