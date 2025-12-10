@@ -148,12 +148,17 @@ export class WebSocketManager {
         this.handleEndSession(clientId, client, message);
         break;
 
+      case 'ping':
+        // Keep-alive request from host, respond with pong
+        this.sendMessage(client.ws, { type: 'pong' });
+        break;
+
       case 'pong':
         // Keep-alive response, no action needed
         break;
 
       default:
-        console.warn(`Unknown message type from ${clientId}`);
+        console.warn(`Unknown message type from ${clientId}:`, message.type);
     }
   }
 
