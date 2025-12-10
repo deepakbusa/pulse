@@ -543,17 +543,18 @@ export class WebSocketManager {
     // Format log with timestamp and device info
     const timeStr = timestamp || new Date().toISOString();
     const deviceInfo = deviceId || client?.deviceId || clientId.substring(0, 8);
-    const levelEmoji = {
+    const levelEmojiMap: Record<string, string> = {
       'info': 'ℹ️',
       'warn': '⚠️',
       'error': '❌',
       'debug': '🔍',
       'success': '✅'
-    }[level.toLowerCase()] || '📝';
+    };
+    const levelEmoji = levelEmojiMap[level?.toLowerCase()] || '📝';
     
     console.log(`\n${levelEmoji} [HOST LOG] ${timeStr}`);
     console.log(`   Device: ${deviceInfo}`);
-    console.log(`   Level: ${level.toUpperCase()}`);
+    console.log(`   Level: ${level?.toUpperCase() || 'UNKNOWN'}`);
     console.log(`   Message: ${logMessage}\n`);
   }
 
